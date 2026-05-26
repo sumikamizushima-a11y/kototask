@@ -1090,6 +1090,98 @@ main {
 }
 .task-row.new { animation: fadeIn 200ms ease; }
 
+/* ============ Notion Inbox ============ */
+.inbox-card {
+  padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(250,228,216,.18) 0%, #fff 60%);
+  border: 1px solid var(--border);
+}
+.inbox-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.inbox-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.inbox-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.inbox-sub {
+  font-size: 11px;
+  color: var(--gray-500);
+  margin-bottom: 8px;
+}
+.inbox-list { list-style: none; padding: 0; margin: 0; }
+.inbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--gray-100);
+}
+.inbox-item:last-child { border-bottom: none; }
+.inbox-item-main { flex: 1; min-width: 0; }
+.inbox-item-title {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.inbox-item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+.inbox-priority {
+  font-size: 10px;
+  color: #d76b66;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+.inbox-due {
+  font-size: 10px;
+  color: var(--gray-600);
+  background: var(--gray-100);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.inbox-link {
+  font-size: 12px;
+  color: var(--gray-500);
+  text-decoration: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.inbox-link:hover { color: var(--ink); background: var(--gray-100); }
+.inbox-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.inbox-item-actions .btn-sm { padding: 4px 10px; font-size: 11px; }
+
 /* ============ Notion sync card ============ */
 .notion-status {
   font-size: 10px;
@@ -1703,7 +1795,12 @@ const KEYS = {
   lastReview: 'taskdock_lastReviewShown',
   templates: 'taskdock_templates',
   notion: 'taskdock_notionConfig',
+  notionInbox: 'taskdock_notionInbox',
 };
+
+// Default Kotomusubi team TODO database
+const NOTION_DEFAULT_DB_ID = '33eedc46-8f20-80cd-b6dc-fbf3adfa6e95';
+const NOTION_DEFAULT_DB_URL = 'https://www.notion.so/33eedc468f2080cdb6dcfbf3adfa6e95';
 const loadJSON = (key, fb) => {
   try {
     const v = localStorage.getItem(key);
@@ -1781,11 +1878,13 @@ function migrateTemplates() {
 const DEFAULT_NOTION_CONFIG = {
   workerUrl: '',
   apiKey: '',
-  userId: '',
-  tasksDatabaseId: '',
+  userId: '',                            // Notion user UUID (assignee filter)
+  userName: '',                          // 自分の Notion 上の表示名
+  tasksDatabaseId: NOTION_DEFAULT_DB_ID, // デフォルトで Kotomusubi の TODO DB
   meetingDatabaseId: '',
   autoSync: false,
   lastSync: null,
+  identityAsked: false,                  // 初回プロンプト済みフラグ
 };
 
 const state = {
@@ -1796,6 +1895,7 @@ const state = {
   reviews: loadJSON(KEYS.reviews, []),
   templates: loadJSON(KEYS.templates, null) || DEFAULT_TEMPLATES.slice(),
   notion: {...DEFAULT_NOTION_CONFIG, ...loadJSON(KEYS.notion, {})},
+  notionInbox: loadJSON(KEYS.notionInbox, []),
   view: 'list',
   activeTab: 'tasks',
   calendarYear: new Date().getFullYear(),
@@ -1816,7 +1916,8 @@ const persistWorkTypes = () => { saveJSON(KEYS.workTypes, state.workTypes); sche
 const persistNotes     = () => { saveJSON(KEYS.notes, state.notes); scheduleSync(); };
 const persistReviews   = () => { saveJSON(KEYS.reviews, state.reviews); scheduleSync(); };
 const persistTemplates = () => { saveJSON(KEYS.templates, state.templates); scheduleSync(); };
-const persistNotion    = () => { saveJSON(KEYS.notion, state.notion); scheduleSync(); };
+const persistNotion       = () => { saveJSON(KEYS.notion, state.notion); scheduleSync(); };
+const persistNotionInbox  = () => { saveJSON(KEYS.notionInbox, state.notionInbox); scheduleSync(); };
 
 /* ============ Icons ============ */
 const Icon = {
@@ -1930,76 +2031,105 @@ function importNotionJSON(text) {
     showToast('JSON の形式が不正です');
     return { ok: false };
   }
-  const today = todayISO();
-  let added = 0;
-  let updated = 0;
-  let skipped = 0;
+
+  let addedToInbox = 0;
+  let alreadyInTasks = 0;
+  let alreadyInInbox = 0;
+
+  // Helper: existing keys for dedup
+  const inTaskById = new Set(state.tasks.map(t => t.notionPageId).filter(Boolean));
+  const inTaskByBlock = new Set(state.tasks.map(t => t.notionBlockId).filter(Boolean));
+  const inInboxById = new Set(state.notionInbox.map(i => i.notionPageId).filter(Boolean));
+  const inInboxByBlock = new Set(state.notionInbox.map(i => i.notionBlockId).filter(Boolean));
 
   for (const nt of (data.tasks || [])) {
-    if (!nt.notionPageId || !nt.title) { skipped++; continue; }
-    const existing = state.tasks.find(t => t.notionPageId === nt.notionPageId);
-    if (existing) {
-      if (nt.completed && existing.status !== 'completed') {
-        existing.status = 'completed';
-        existing.completedAt = new Date().toISOString();
-        if (!existing.actualHours) existing.actualHours = existing.estimatedHours;
-        updated++;
-      }
-      continue;
-    }
-    if (nt.completed) { skipped++; continue; }
-    const id = addTask({
+    if (!nt.notionPageId || !nt.title) continue;
+    if (inTaskById.has(nt.notionPageId)) { alreadyInTasks++; continue; }
+    if (inInboxById.has(nt.notionPageId)) { alreadyInInbox++; continue; }
+    if (nt.completed) continue; // skip completed
+    state.notionInbox.push({
+      id: uid(),
+      kind: 'task',
       title: nt.title,
-      scheduledDate: nt.dueDate || nt.scheduledDate || today,
+      notionPageId: nt.notionPageId,
+      url: nt.url || nt.notionUrl || null,
+      dueDate: nt.dueDate || null,
       estimatedHours: Number(nt.estimatedHours) || 1,
+      priority: nt.priority || null,
+      project: nt.project || null,
+      status: nt.status || null,
+      addedAt: new Date().toISOString(),
     });
-    const t = state.tasks.find(x => x.id === id);
-    if (t) {
-      t.notionPageId = nt.notionPageId;
-      t.notionUrl = nt.url || nt.notionUrl || null;
-      t.notionSource = 'task';
-    }
-    added++;
+    addedToInbox++;
   }
 
   for (const m of (data.mentions || [])) {
-    if (!m.notionBlockId || !(m.text || m.title)) { skipped++; continue; }
-    const existing = state.tasks.find(t => t.notionBlockId === m.notionBlockId);
+    if (!m.notionBlockId || !(m.text || m.title)) continue;
+    if (inTaskByBlock.has(m.notionBlockId)) { alreadyInTasks++; continue; }
+    if (inInboxByBlock.has(m.notionBlockId)) { alreadyInInbox++; continue; }
+    if (m.completed) continue;
     const txt = m.text || m.title;
-    if (existing) {
-      if (m.completed && existing.status !== 'completed') {
-        existing.status = 'completed';
-        existing.completedAt = new Date().toISOString();
-        updated++;
-      }
-      continue;
-    }
-    if (m.completed) { skipped++; continue; }
-    const id = addTask({
-      title: txt.length > 80 ? txt.slice(0, 80) + '…' : txt,
-      scheduledDate: today,
+    state.notionInbox.push({
+      id: uid(),
+      kind: 'mention',
+      title: txt.length > 100 ? txt.slice(0, 100) + '…' : txt,
+      notionBlockId: m.notionBlockId,
+      notionPageId: m.notionPageId || null,
+      url: m.pageUrl || m.url || null,
+      pageTitle: m.pageTitle || null,
       estimatedHours: 0.5,
+      addedAt: new Date().toISOString(),
     });
-    const t = state.tasks.find(x => x.id === id);
-    if (t) {
-      t.notionBlockId = m.notionBlockId;
-      t.notionPageId = m.notionPageId || null;
-      t.notionUrl = m.pageUrl || m.url || null;
-      t.notionPageTitle = m.pageTitle || null;
-      t.notionSource = 'mention';
-    }
-    added++;
+    addedToInbox++;
   }
 
-  persistTasks();
+  persistNotionInbox();
   renderActiveTab();
 
-  if (added === 0 && updated === 0) {
-    showToast('新しい取り込み対象はありません（すべて重複）');
+  if (addedToInbox === 0) {
+    showToast(`新しい取り込みなし（既存${alreadyInTasks + alreadyInInbox}件）`);
   } else {
-    showToast(`Notion から ${added} 件追加${updated ? ` / ${updated} 件更新` : ''}`);
+    showToast(`Notion インボックスに ${addedToInbox} 件追加`);
   }
-  return { ok: true, added, updated, skipped };
+  return { ok: true, addedToInbox, alreadyInTasks, alreadyInInbox };
+}
+
+/* Inbox helpers — pick item to today / remove */
+function pickInboxItem(itemId) {
+  const idx = state.notionInbox.findIndex(i => i.id === itemId);
+  if (idx < 0) return;
+  const item = state.notionInbox[idx];
+  const today = todayISO();
+  const newId = addTask({
+    title: item.title,
+    scheduledDate: item.dueDate || today,
+    estimatedHours: item.estimatedHours || 1,
+  });
+  const t = state.tasks.find(x => x.id === newId);
+  if (t) {
+    if (item.notionPageId) t.notionPageId = item.notionPageId;
+    if (item.notionBlockId) t.notionBlockId = item.notionBlockId;
+    if (item.url) t.notionUrl = item.url;
+    if (item.pageTitle) t.notionPageTitle = item.pageTitle;
+    t.notionSource = item.kind === 'mention' ? 'mention' : 'task';
+  }
+  state.notionInbox.splice(idx, 1);
+  persistTasks();
+  persistNotionInbox();
+  state.justAddedId = newId;
+  showToast(`「${item.title.slice(0, 30)}…」をタスク化`);
+  renderActiveTab();
+}
+function dismissInboxItem(itemId) {
+  state.notionInbox = state.notionInbox.filter(i => i.id !== itemId);
+  persistNotionInbox();
+  renderActiveTab();
+}
+function clearInbox() {
+  if (!confirm('インボックスを全部クリアしますか？タスク化していないものは消えます。')) return;
+  state.notionInbox = [];
+  persistNotionInbox();
+  renderActiveTab();
 }
 
 async function notionWriteback(task, completed) {
@@ -2200,6 +2330,8 @@ function renderTasks() {
           <button class="btn btn-primary" id="quickAddBtn">追加</button>
         </div>
 
+        ${renderNotionInbox()}
+
         ${state.view === 'list' ? renderListView(today, todayTasks) : renderTimelineView(todayTasks)}
       </div>
 
@@ -2240,6 +2372,66 @@ function renderTasks() {
   if (state.view === 'list') bindTaskListInteractions();
   else bindTimelineInteractions();
   bindNotesInteractions();
+  bindInboxInteractions();
+}
+
+function bindInboxInteractions() {
+  $('#inboxClear')?.addEventListener('click', clearInbox);
+  $$('.inbox-item').forEach(li => {
+    const id = li.dataset.id;
+    li.querySelector('[data-action="inbox-pick"]')?.addEventListener('click', e => { e.stopPropagation(); pickInboxItem(id); });
+    li.querySelector('[data-action="inbox-dismiss"]')?.addEventListener('click', e => { e.stopPropagation(); dismissInboxItem(id); });
+  });
+}
+
+function renderNotionInbox() {
+  const inbox = state.notionInbox || [];
+  if (inbox.length === 0) return '';
+  // Sort: assigned to me first (if userName matches), then by priority
+  const me = (state.notion.userName || '').toLowerCase();
+  const sorted = inbox.slice().sort((a, b) => {
+    // Higher priority first (★ count)
+    const ap = (a.priority || '').length;
+    const bp = (b.priority || '').length;
+    if (ap !== bp) return bp - ap;
+    return (a.addedAt || '').localeCompare(b.addedAt || '');
+  });
+  return `
+    <div class="card inbox-card">
+      <div class="inbox-header">
+        <div class="inbox-title">
+          <span class="inbox-badge">${inbox.length}</span>
+          <span>Notion インボックス</span>
+        </div>
+        <button class="btn btn-outline btn-sm" id="inboxClear">全クリア</button>
+      </div>
+      <div class="inbox-sub">タスク化するものを選んで「ピック」</div>
+      <ul class="inbox-list">
+        ${sorted.map(item => {
+          const prio = item.priority ? `<span class="inbox-priority">${escapeHTML(item.priority)}</span>` : '';
+          const proj = item.project ? `<span class="tag" style="background:rgba(99,102,241,.13);color:#4f51d8">${escapeHTML(item.project)}</span>` : '';
+          const status = item.status && item.status !== '未完了' ? `<span class="tag" style="background:rgba(168,143,92,.16);color:#8c7340">${escapeHTML(item.status)}</span>` : '';
+          const dueChip = item.dueDate ? `<span class="inbox-due">${item.dueDate.slice(5)}</span>` : '';
+          const kindChip = item.kind === 'mention' ? `<span class="tag" style="background:rgba(168,143,92,.16);color:#8c7340">📝 ${escapeHTML(item.pageTitle || 'MTG')}</span>` : '';
+          const url = item.url ? `<a class="inbox-link" href="${escapeHTML(item.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Notion で開く">↗</a>` : '';
+          return `
+            <li class="inbox-item" data-id="${item.id}">
+              <div class="inbox-item-main">
+                <div class="inbox-item-title">${escapeHTML(item.title)}</div>
+                <div class="inbox-item-meta">
+                  ${prio}${dueChip}${proj}${status}${kindChip}${url}
+                </div>
+              </div>
+              <div class="inbox-item-actions">
+                <button class="btn btn-primary btn-sm" data-action="inbox-pick">ピック</button>
+                <button class="btn btn-outline btn-sm" data-action="inbox-dismiss" title="インボックスから除外">×</button>
+              </div>
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    </div>
+  `;
 }
 
 function renderListView(today, todayTasks) {
@@ -2823,14 +3015,34 @@ function renderSettings() {
     </div>
 
 <div class="card notion-card">
-      <div class="settings-card-title">Notion から取り込み</div>
-      <div style="font-size:12px;color:var(--gray-600);margin-bottom:14px;line-height:1.7;">
-        Claude に「<b>今日の Notion タスク取って</b>」と頼むと JSON を返します。
-        それをここに貼って「取り込み」を押すと、未取り込みのタスクとミーティングのアクションが今日のリストに追加されます（重複しません）。
+      <div class="settings-card-title">Notion 連携</div>
+
+      <div class="notion-fields">
+        <div class="notion-field">
+          <label>自分の Notion 表示名（担当者でフィルタするのに使う）</label>
+          <input id="notionUserName" type="text" placeholder="例: Sumika Mizushima" value="${escapeHTML(state.notion.userName || '')}">
+        </div>
+        <div class="notion-field">
+          <label>Notion ユーザー ID（任意・UUID 形式）</label>
+          <input id="notionUserId" type="text" placeholder="xxxxxxxx-xxxx-..." value="${escapeHTML(state.notion.userId || '')}">
+        </div>
+        <div class="notion-field">
+          <label>タスク DB の ID</label>
+          <input id="notionTasksDb" type="text" placeholder="32文字のID" value="${escapeHTML(state.notion.tasksDatabaseId || '')}">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-outline btn-sm" id="notionSaveConfig">設定を保存</button>
+        <a class="btn btn-outline btn-sm" href="${NOTION_DEFAULT_DB_URL}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;">📂 Notion でDBを開く</a>
+      </div>
+
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--gray-100);font-size:12px;color:var(--gray-600);line-height:1.7;">
+        Claude に「<b>Notion から自分のタスク取って</b>」と頼むと、上の設定をもとに JSON を返します。
+        それを下に貼って「取り込み」を押すと <b>インボックス</b> に入ります（直接タスクにはなりません）。Tasks タブで「ピック」したものだけタスク化されます。
       </div>
       <textarea id="notionImportJson" placeholder='ここに Claude からもらった JSON を貼ってください...' style="
         width: 100%;
-        min-height: 120px;
+        min-height: 110px;
         max-height: 320px;
         border: 1px solid var(--gray-200);
         border-radius: 8px;
@@ -2841,9 +3053,10 @@ function renderSettings() {
         outline: none;
         resize: vertical;
         line-height: 1.5;
+        margin-top: 10px;
       "></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-        <button class="btn btn-primary" id="notionImportBtn">取り込み</button>
+        <button class="btn btn-primary" id="notionImportBtn">インボックスに取り込み</button>
         <button class="btn btn-outline" id="notionImportClear">クリア</button>
         ${state.notion.lastSync ? `<span style="font-size:10px;color:var(--gray-500);margin-left:auto;">最終取り込み: ${new Date(state.notion.lastSync).toLocaleString('ja-JP')}</span>` : ''}
       </div>
@@ -2933,6 +3146,16 @@ function renderSettings() {
   }));
 
   // ===== Notion import handlers =====
+  $('#notionSaveConfig')?.addEventListener('click', () => {
+    state.notion.userName = ($('#notionUserName').value || '').trim();
+    state.notion.userId = ($('#notionUserId').value || '').trim();
+    state.notion.tasksDatabaseId = ($('#notionTasksDb').value || '').trim() || NOTION_DEFAULT_DB_ID;
+    state.notion.identityAsked = true;
+    persistNotion();
+    showToast('Notion 設定を保存しました');
+    renderSettings();
+  });
+
   $('#notionImportBtn').addEventListener('click', () => {
     const text = ($('#notionImportJson').value || '').trim();
     if (!text) { showToast('JSON を貼り付けてください'); return; }
@@ -3284,6 +3507,7 @@ async function syncStateToFirestore() {
     reviews: state.reviews,
     templates: state.templates,
     notion: state.notion,
+    notionInbox: state.notionInbox,
     updatedAt: window._fb.serverTimestamp(),
     clientId: getClientId(),
   };
@@ -3318,6 +3542,10 @@ function applyRemoteState(data) {
     if (data.notion && typeof data.notion === 'object') {
       state.notion = {...DEFAULT_NOTION_CONFIG, ...data.notion};
       saveJSON(KEYS.notion, state.notion);
+    }
+    if (Array.isArray(data.notionInbox)) {
+      state.notionInbox = data.notionInbox;
+      saveJSON(KEYS.notionInbox, state.notionInbox);
     }
     renderActiveTab();
   } finally {
@@ -3527,13 +3755,35 @@ function setupAuth() {
 if (window._fb) setupAuth();
 else window.addEventListener('firebase-loaded', setupAuth);
 
+function maybeAskNotionIdentity() {
+  if (state.notion.identityAsked) return;
+  // Show a small prompt at the bottom asking for Notion name
+  setTimeout(() => {
+    const name = prompt('Notion 連携で、自分の担当タスクだけ取り込めるようにするための設定です。\n\nNotion 上の自分の表示名を入力してください（後で Settings からも変更可）:', '');
+    if (name === null) return; // canceled
+    state.notion.userName = (name || '').trim();
+    state.notion.identityAsked = true;
+    if (!state.notion.tasksDatabaseId) state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID;
+    persistNotion();
+    if (state.notion.userName) {
+      showToast(`${state.notion.userName} として保存しました`);
+    }
+  }, 1500);
+}
+
 /* ============ Init ============ */
 function init() {
+  // Migrate: ensure default DB ID is set for existing users
+  if (!state.notion.tasksDatabaseId) {
+    state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID;
+    saveJSON(KEYS.notion, state.notion);
+  }
   migrateTemplates();
   checkAutoApplyTemplates();
   renderNav();
   renderActiveTab();
   maybeShowReview();
+  maybeAskNotionIdentity();
   // Auto Notion sync (background, non-blocking)
   if (state.notion.autoSync && state.notion.workerUrl && state.notion.apiKey && state.notion.userId) {
     setTimeout(() => syncNotion({ silent: false }), 800);
