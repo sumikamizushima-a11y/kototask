@@ -3767,8 +3767,8 @@ if (window._fb) setupAuth();
 else window.addEventListener('firebase-loaded', setupAuth);
 
 function maybeAskNotionIdentity() {
-  if (state.notion.identityAsked) return;
-  setTimeout(() => showNotionIdentityModal(), 1200);
+  // Disabled — identity can be set from Settings → Notion 連携 → 「自分は誰？」
+  return;
 }
 
 function showNotionIdentityModal() {
