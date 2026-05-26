@@ -1801,6 +1801,16 @@ const KEYS = {
 // Default Kotomusubi team TODO database
 const NOTION_DEFAULT_DB_ID = '33eedc46-8f20-80cd-b6dc-fbf3adfa6e95';
 const NOTION_DEFAULT_DB_URL = 'https://www.notion.so/33eedc468f2080cdb6dcfbf3adfa6e95';
+
+// Kotomusubi team members (Notion user IDs)
+const NOTION_TEAM_MEMBERS = [
+  { id: '9801293a-173d-4fd7-8286-902381d3621c', name: 'Sumika Mizushima' },
+  { id: 'a2e4f053-6448-47ef-8175-ea8e622ac7cc', name: 'shion（shionnnn1016）' },
+  { id: '332d872b-594c-81ab-a619-000297216d27', name: 'shion（nihongo.kotomusubi）' },
+  { id: '2f0d872b-594c-819a-bc8e-0002d865dcdf', name: 'はるか（uru65coco）' },
+  { id: 'f1d2f8cc-11fb-4a82-b870-c5b631b15594', name: 'Haruka🇯🇵（nekodaisk）' },
+  { id: '24bd872b-594c-81fb-948d-0002bdbf228d', name: 'Mai' },
+];
 const loadJSON = (key, fb) => {
   try {
     const v = localStorage.getItem(key);
@@ -3019,12 +3029,11 @@ function renderSettings() {
 
       <div class="notion-fields">
         <div class="notion-field">
-          <label>自分の Notion 表示名（担当者でフィルタするのに使う）</label>
-          <input id="notionUserName" type="text" placeholder="例: Sumika Mizushima" value="${escapeHTML(state.notion.userName || '')}">
-        </div>
-        <div class="notion-field">
-          <label>Notion ユーザー ID（任意・UUID 形式）</label>
-          <input id="notionUserId" type="text" placeholder="xxxxxxxx-xxxx-..." value="${escapeHTML(state.notion.userId || '')}">
+          <label>自分は誰？（担当者でフィルタするのに使う）</label>
+          <select id="notionUser">
+            <option value="">-- 選択してください --</option>
+            ${NOTION_TEAM_MEMBERS.map(m => `<option value="${m.id}" ${state.notion.userId === m.id ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}
+          </select>
         </div>
         <div class="notion-field">
           <label>タスク DB の ID</label>
@@ -3147,12 +3156,14 @@ function renderSettings() {
 
   // ===== Notion import handlers =====
   $('#notionSaveConfig')?.addEventListener('click', () => {
-    state.notion.userName = ($('#notionUserName').value || '').trim();
-    state.notion.userId = ($('#notionUserId').value || '').trim();
+    const userId = $('#notionUser').value;
+    const member = NOTION_TEAM_MEMBERS.find(m => m.id === userId);
+    state.notion.userId = userId || '';
+    state.notion.userName = member ? member.name : '';
     state.notion.tasksDatabaseId = ($('#notionTasksDb').value || '').trim() || NOTION_DEFAULT_DB_ID;
     state.notion.identityAsked = true;
     persistNotion();
-    showToast('Notion 設定を保存しました');
+    showToast(member ? `${member.name} として保存しました` : 'Notion 設定を保存しました');
     renderSettings();
   });
 
@@ -3757,18 +3768,52 @@ else window.addEventListener('firebase-loaded', setupAuth);
 
 function maybeAskNotionIdentity() {
   if (state.notion.identityAsked) return;
-  // Show a small prompt at the bottom asking for Notion name
-  setTimeout(() => {
-    const name = prompt('Notion 連携で、自分の担当タスクだけ取り込めるようにするための設定です。\n\nNotion 上の自分の表示名を入力してください（後で Settings からも変更可）:', '');
-    if (name === null) return; // canceled
-    state.notion.userName = (name || '').trim();
+  setTimeout(() => showNotionIdentityModal(), 1200);
+}
+
+function showNotionIdentityModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay open';
+  overlay.id = '_identityModal';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:380px;">
+      <div class="modal-header">
+        <div class="modal-title">あなたは誰？</div>
+      </div>
+      <div class="modal-body" style="padding-top:8px;">
+        <div style="font-size:12px;color:var(--gray-600);line-height:1.6;margin-bottom:14px;">
+          Notion 連携で、自分の担当タスクだけ取り込めるようにします。<br>
+          Notion 上のあなたを選んでください（後で Settings から変更可）。
+        </div>
+        <select id="_identitySelect" style="width:100%;border:1px solid var(--gray-200);border-radius:7px;padding:9px 11px;font-size:13px;background:var(--gray-50);outline:none;font-family:inherit;">
+          <option value="">-- 選択してください --</option>
+          ${NOTION_TEAM_MEMBERS.map(m => `<option value="${m.id}">${escapeHTML(m.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="_identitySkip">スキップ</button>
+        <button class="btn btn-primary" id="_identitySave">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('_identitySkip').addEventListener('click', () => {
+    state.notion.identityAsked = true;
+    persistNotion();
+    overlay.remove();
+  });
+  document.getElementById('_identitySave').addEventListener('click', () => {
+    const id = document.getElementById('_identitySelect').value;
+    const member = NOTION_TEAM_MEMBERS.find(m => m.id === id);
+    if (!member) { alert('選択してください（スキップなら下のキャンセル）'); return; }
+    state.notion.userId = member.id;
+    state.notion.userName = member.name;
     state.notion.identityAsked = true;
     if (!state.notion.tasksDatabaseId) state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID;
     persistNotion();
-    if (state.notion.userName) {
-      showToast(`${state.notion.userName} として保存しました`);
-    }
-  }, 1500);
+    overlay.remove();
+    showToast(`${member.name} として保存しました`);
+  });
 }
 
 /* ============ Init ============ */
