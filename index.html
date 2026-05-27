@@ -497,6 +497,24 @@ main {
   font-family: inherit;
 }
 
+.task-move {
+  border: none;
+  background: none;
+  font-size: 13px;
+  padding: 4px 7px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease, background .15s ease;
+  line-height: 1;
+}
+.task-row:hover .task-move { opacity: .7; }
+.task-move:hover { opacity: 1 !important; background: var(--gray-100); }
+@media (max-width: 768px) {
+  .task-move { opacity: .7; }
+}
+
 .task-delete {
   width: 24px;
   height: 24px;
@@ -2367,7 +2385,7 @@ function renderTasks() {
     renderTasks();
     setTimeout(() => $('#quickAddInput')?.focus(), 0);
   };
-  qInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addQuick(); } });
+  qInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); addQuick(); } });
   qBtn.addEventListener('click', addQuick);
 
   $$('[data-apply-tmpl]').forEach(btn => btn.addEventListener('click', () => {
@@ -2499,6 +2517,19 @@ function taskRowHTML(t) {
   const project = getProject(t.projectId);
   const wt = getWorkType(t.workType);
   const isNew = state.justAddedId === t.id;
+  const today = todayISO();
+  // Move button: today→someday or someday→today (only for pending tasks)
+  let moveBtn = '';
+  if (t.status !== 'completed') {
+    if (t.scheduledDate === today) {
+      moveBtn = `<button class="task-move" data-action="move-someday" title="いつかやるへ移動">📌</button>`;
+    } else if (!t.scheduledDate) {
+      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">☀️</button>`;
+    } else if (t.scheduledDate < today) {
+      // past: offer move to today
+      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">☀️</button>`;
+    }
+  }
   return `
     <li class="task-row ${t.status==='completed'?'completed':''} ${isNew?'new':''}" data-id="${t.id}">
       <span class="task-handle" title="ドラッグ">⋮⋮</span>
@@ -2514,9 +2545,21 @@ function taskRowHTML(t) {
         return `<button class="${cls}" data-action="status" style="${style}" title="ステータスを変更">${p.label}</button>`;
       })()}
       <button class="hours-tag" data-action="hours">${fmt(t.estimatedHours||0)}h</button>
+      ${moveBtn}
       <button class="task-delete" data-action="delete" aria-label="削除">${Icon.trash}</button>
     </li>
   `;
+}
+
+function moveTask(id, target) {
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return;
+  const newDate = target === 'today' ? todayISO() : null;
+  t.scheduledDate = newDate;
+  t.order = nextOrder(newDate);
+  persistTasks();
+  showToast(target === 'today' ? '今日に移動しました' : 'いつかやるに移動しました');
+  renderActiveTab();
 }
 
 function renderTimelineView(tasks) {
@@ -2584,12 +2627,15 @@ function bindTaskListInteractions() {
     row.querySelector('[data-action="delete"]')?.addEventListener('click', e => { e.stopPropagation(); deleteTask(id); });
     row.querySelector('[data-action="hours"]')?.addEventListener('click', e => { e.stopPropagation(); openHoursSelect(e.currentTarget, task); });
     row.querySelector('[data-action="status"]')?.addEventListener('click', e => { e.stopPropagation(); openProgressSelect(e.currentTarget, task); });
+    row.querySelector('[data-action="move-today"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'today'); });
+    row.querySelector('[data-action="move-someday"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'someday'); });
     row.querySelector('[data-action="edit"]')?.addEventListener('click', e => { e.stopPropagation(); editTitleInline(e.currentTarget, task); });
   });
 
   $$('.inline-add-input').forEach(input => {
     input.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
+      if (e.isComposing || e.keyCode === 229) return; // skip IME-confirm Enter
       e.preventDefault();
       const title = input.value.trim();
       if (!title) return;
@@ -2677,7 +2723,7 @@ function editTitleInline(el, task) {
   const cancel = () => { if (done) return; done = true; renderActiveTab(); };
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
   });
 }
@@ -2968,11 +3014,14 @@ function bindCalendarDayPanelInteractions() {
     row.querySelector('[data-action="delete"]')?.addEventListener('click', e => { e.stopPropagation(); deleteTask(id); });
     row.querySelector('[data-action="hours"]')?.addEventListener('click', e => { e.stopPropagation(); openHoursSelect(e.currentTarget, task); });
     row.querySelector('[data-action="status"]')?.addEventListener('click', e => { e.stopPropagation(); openProgressSelect(e.currentTarget, task); });
+    row.querySelector('[data-action="move-today"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'today'); });
+    row.querySelector('[data-action="move-someday"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'someday'); });
     row.querySelector('[data-action="edit"]')?.addEventListener('click', e => { e.stopPropagation(); editTitleInline(e.currentTarget, task); });
   });
   $$('.inline-add-input', panel).forEach(input => {
     input.addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
+      if (e.isComposing || e.keyCode === 229) return; // skip IME-confirm Enter
       e.preventDefault();
       const title = input.value.trim();
       if (!title) return;
@@ -3123,7 +3172,7 @@ function renderSettings() {
     renderSettings();
   };
   $('#wtAdd').addEventListener('click', addWT);
-  $('#wtInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addWT(); } });
+  $('#wtInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); addWT(); } });
 
   const addProj = () => {
     const name = $('#projInput').value.trim();
@@ -3133,7 +3182,7 @@ function renderSettings() {
     renderSettings();
   };
   $('#projAdd').addEventListener('click', addProj);
-  $('#projInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addProj(); } });
+  $('#projInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); addProj(); } });
 
   $$('[data-del-wt]').forEach(b => b.addEventListener('click', () => {
     const id = b.dataset.delWt;
