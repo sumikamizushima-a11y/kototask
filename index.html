@@ -498,21 +498,29 @@ main {
 }
 
 .task-move {
-  border: none;
-  background: none;
-  font-size: 13px;
-  padding: 4px 7px;
-  border-radius: 5px;
+  border: 1px solid var(--gray-200);
+  background: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gray-600);
+  padding: 3px 8px;
+  border-radius: 999px;
   flex-shrink: 0;
   cursor: pointer;
   opacity: 0;
-  transition: opacity .15s ease, background .15s ease;
-  line-height: 1;
+  transition: all .15s ease;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  font-family: inherit;
 }
-.task-row:hover .task-move { opacity: .7; }
-.task-move:hover { opacity: 1 !important; background: var(--gray-100); }
+.task-row:hover .task-move { opacity: 1; }
+.task-move:hover {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
 @media (max-width: 768px) {
-  .task-move { opacity: .7; }
+  .task-move { opacity: 1; }
 }
 
 .task-delete {
@@ -2522,12 +2530,11 @@ function taskRowHTML(t) {
   let moveBtn = '';
   if (t.status !== 'completed') {
     if (t.scheduledDate === today) {
-      moveBtn = `<button class="task-move" data-action="move-someday" title="いつかやるへ移動">📌</button>`;
+      moveBtn = `<button class="task-move" data-action="move-someday" title="いつかやるへ移動">→いつか</button>`;
     } else if (!t.scheduledDate) {
-      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">☀️</button>`;
+      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>`;
     } else if (t.scheduledDate < today) {
-      // past: offer move to today
-      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">☀️</button>`;
+      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>`;
     }
   }
   return `
