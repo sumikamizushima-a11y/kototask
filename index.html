@@ -655,8 +655,12 @@ main {
   resize: none;
   outline: none;
   min-height: 56px;
-  transition: all .15s ease;
+  transition: border-color .15s ease, background .15s ease;
   background: var(--gray-50);
+  overflow: hidden;
+  field-sizing: content;
+  line-height: 1.55;
+  font-family: inherit;
 }
 .notes-add textarea:focus { border-color: var(--gray-400); background: #fff; }
 .notes-add-row { display: flex; gap: 8px; align-items: center; }
@@ -715,10 +719,14 @@ main {
   border-radius: 6px;
   padding: 7px 9px;
   font-size: 12px;
-  resize: vertical;
+  resize: none;
   min-height: 80px;
   outline: none;
   background: #fff;
+  overflow: hidden;
+  field-sizing: content;
+  line-height: 1.6;
+  font-family: inherit;
 }
 .note-edit:focus { border-color: var(--gray-500); }
 .note-edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
@@ -2826,7 +2834,25 @@ function noteCardHTML(n) {
   `;
 }
 
+function autoGrowTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
 function bindNotesInteractions() {
+  // Auto-grow for the add textarea
+  const noteInput = $('#noteInput');
+  if (noteInput) {
+    autoGrowTextarea(noteInput);
+    noteInput.addEventListener('input', () => autoGrowTextarea(noteInput));
+  }
+  // Auto-grow for expanded edit textareas
+  $$('.note-edit').forEach(ta => {
+    autoGrowTextarea(ta);
+    ta.addEventListener('input', () => autoGrowTextarea(ta));
+  });
+
   $('#noteSubmit')?.addEventListener('click', () => {
     const input = $('#noteInput');
     const sel = $('#noteProject');
