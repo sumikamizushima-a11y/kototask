@@ -4044,25 +4044,72 @@ function showNotionIdentityModal() {
 }
 
 /* ============ Init ============ */
-function init() {
-  // Migrate: ensure Worker URL / API key / DB ID defaults for existing users
-  let migrated = false;
-  if (!state.notion.tasksDatabaseId) { state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID; migrated = true; }
-  if (!state.notion.workerUrl)       { state.notion.workerUrl       = DEFAULT_NOTION_CONFIG.workerUrl; migrated = true; }
-  if (!state.notion.apiKey)          { state.notion.apiKey          = DEFAULT_NOTION_CONFIG.apiKey; migrated = true; }
-  if (state.notion.autoSync === undefined) { state.notion.autoSync = true; migrated = true; }
-  if (migrated) saveJSON(KEYS.notion, state.notion);
+// Reset URL trigger: ?reset=1 clears all KotoTask data
+(function handleResetParam() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('reset') === '1') {
+    if (confirm('KotoTask のローカルデータを全部リセットしますか？\nクラウドに保存済みのデータは残ります（再ログインで戻ります）。')) {
+      Object.keys(localStorage).filter(k => k.startsWith('taskdock_')).forEach(k => localStorage.removeItem(k));
+      // Also clear Firebase auth so user gets fresh login
+      Object.keys(localStorage).filter(k => k.startsWith('firebase:') || k.includes('firebaseLocalStorage')).forEach(k => localStorage.removeItem(k));
+      indexedDB.deleteDatabase('firebaseLocalStorageDb');
+      const url = location.pathname;
+      setTimeout(() => location.replace(url), 100);
+      return;
+    }
+  }
+})();
 
-  migrateTemplates();
-  checkAutoApplyTemplates();
-  renderNav();
-  renderActiveTab();
-  maybeShowReview();
-  // Auto Notion sync (background, non-blocking) — only if userId is set
-  if (state.notion.autoSync && state.notion.workerUrl && state.notion.apiKey && state.notion.userId) {
-    setTimeout(() => syncNotion({ silent: true }), 1500);
+function showFatalError(err) {
+  document.body.innerHTML = `
+    <div style="padding: 40px 24px; max-width: 480px; margin: 60px auto; font-family: -apple-system, sans-serif; line-height: 1.6;">
+      <h2 style="margin-bottom: 14px;">エラーが起きました</h2>
+      <pre style="background:#f3f2ef; padding: 12px; border-radius: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">${String(err && (err.stack || err.message || err)).slice(0, 800)}</pre>
+      <p style="margin-top: 16px; font-size: 13px; color: #555;">ローカルデータを初期化すると直る可能性があります（クラウドに保存済みのデータは残ります）。</p>
+      <button onclick="if(confirm('ローカルデータをリセットしますか？')){localStorage.clear();indexedDB.deleteDatabase('firebaseLocalStorageDb');location.reload();}" style="margin-top: 16px; padding: 10px 18px; background: #37352f; color: #fff; border: none; border-radius: 8px; font-size: 13px; cursor: pointer;">ローカルデータをリセット</button>
+      <button onclick="location.reload()" style="margin-top: 16px; margin-left: 8px; padding: 10px 18px; background: #fff; color: #37352f; border: 1px solid #ccc; border-radius: 8px; font-size: 13px; cursor: pointer;">再読み込み</button>
+    </div>
+  `;
+}
+
+function init() {
+  try {
+    // Migrate: ensure Worker URL / API key / DB ID defaults for existing users
+    let migrated = false;
+    if (!state.notion.tasksDatabaseId) { state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID; migrated = true; }
+    if (!state.notion.workerUrl)       { state.notion.workerUrl       = DEFAULT_NOTION_CONFIG.workerUrl; migrated = true; }
+    if (!state.notion.apiKey)          { state.notion.apiKey          = DEFAULT_NOTION_CONFIG.apiKey; migrated = true; }
+    if (state.notion.autoSync === undefined) { state.notion.autoSync = true; migrated = true; }
+    if (migrated) saveJSON(KEYS.notion, state.notion);
+
+    // Sanity: ensure required arrays
+    if (!Array.isArray(state.tasks))       state.tasks       = [];
+    if (!Array.isArray(state.projects))    state.projects    = [];
+    if (!Array.isArray(state.notes))       state.notes       = [];
+    if (!Array.isArray(state.reviews))     state.reviews     = [];
+    if (!Array.isArray(state.notionInbox)) state.notionInbox = [];
+    if (!Array.isArray(state.workTypes) || !state.workTypes.length) state.workTypes = DEFAULT_WORK_TYPES.slice();
+    if (!Array.isArray(state.templates))   state.templates   = DEFAULT_TEMPLATES.slice();
+
+    migrateTemplates();
+    checkAutoApplyTemplates();
+    renderNav();
+    renderActiveTab();
+    maybeShowReview();
+    if (state.notion.autoSync && state.notion.workerUrl && state.notion.apiKey && state.notion.userId) {
+      setTimeout(() => syncNotion({ silent: true }), 1500);
+    }
+  } catch (e) {
+    console.error('KotoTask init failed:', e);
+    showFatalError(e);
   }
 }
+
+window.addEventListener('error', (ev) => {
+  // Catch uncaught script errors that might happen after init
+  if (!document.querySelector('header')) showFatalError(ev.error || ev.message);
+});
+
 init();
 </script>
 </body>
