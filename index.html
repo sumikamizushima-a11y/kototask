@@ -2053,6 +2053,7 @@ const state = {
   collapsedToday: false,
   collapsedDays: new Set(),
   collapsedSomeday: false,
+  collapsedDelegated: false,
   expandedNoteId: null,
   expandedTaskId: null,
   justAddedId: null,
@@ -2113,15 +2114,18 @@ function renderActiveTab() {
 const getProject  = id => state.projects.find(p => p.id === id);
 const getWorkType = id => state.workTypes.find(w => w.id === id);
 const tasksOnDate = iso => state.tasks
-  .filter(t => t.scheduledDate === iso)
+  .filter(t => t.scheduledDate === iso && t.bucket !== 'delegated')
   .sort((a,b) => (a.order||0) - (b.order||0));
 const somedayTasks = () => state.tasks
-  .filter(t => !t.scheduledDate)
+  .filter(t => !t.scheduledDate && t.bucket !== 'delegated')
+  .sort((a,b) => (a.order||0) - (b.order||0));
+const delegatedTasks = () => state.tasks
+  .filter(t => t.bucket === 'delegated')
   .sort((a,b) => (a.order||0) - (b.order||0));
 const futureDates = () => {
   const today = todayISO();
   const dates = new Set();
-  state.tasks.forEach(t => { if (t.scheduledDate && t.scheduledDate > today) dates.add(t.scheduledDate); });
+  state.tasks.forEach(t => { if (t.scheduledDate && t.scheduledDate > today && t.bucket !== 'delegated') dates.add(t.scheduledDate); });
   return Array.from(dates).sort();
 };
 function nextOrder(iso) {
@@ -2585,7 +2589,20 @@ function renderListView(today, todayTasks) {
     </div>
   `;
 
-  return sectionToday + sectionsFuture + sectionSomeday;
+  const delegated = delegatedTasks();
+  const sectionDelegated = `
+    <div class="card tasks-section ${state.collapsedDelegated?'collapsed':''}" data-section="delegated">
+      <div class="tasks-section-header" data-toggle-delegated>
+        <div class="tasks-section-title">${Icon.chevDown}🤝 依頼中</div>
+        <div class="tasks-section-count">${delegated.length}件</div>
+      </div>
+      <ul class="task-list">
+        ${delegated.length ? delegated.map(t => taskRowHTML(t)).join('') : '<li class="task-empty">誰かに頼んでるタスクはありません</li>'}
+      </ul>
+    </div>
+  `;
+
+  return sectionToday + sectionsFuture + sectionSomeday + sectionDelegated;
 }
 
 function taskRowHTML(t) {
@@ -2595,17 +2612,33 @@ function taskRowHTML(t) {
   const today = todayISO();
   const hasDesc = !!(t.description && t.description.trim());
   const isExpanded = state.expandedTaskId === t.id;
-  // Move button: today→someday or someday→today (only for pending tasks)
-  let moveBtn = '';
+  // Move buttons (only for pending tasks)
+  let moveBtns = '';
   if (t.status !== 'completed') {
-    if (t.scheduledDate === today) {
-      moveBtn = `<button class="task-move" data-action="move-someday" title="いつかやるへ移動">→いつか</button>`;
+    if (t.bucket === 'delegated') {
+      // 依頼中 → can go back to today or someday
+      moveBtns = `
+        <button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>
+        <button class="task-move" data-action="move-someday" title="いつかやるへ移動">→いつか</button>
+      `;
+    } else if (t.scheduledDate === today) {
+      moveBtns = `
+        <button class="task-move" data-action="move-someday" title="いつかやるへ移動">→いつか</button>
+        <button class="task-move" data-action="move-delegated" title="誰かに頼んでいる">→依頼</button>
+      `;
     } else if (!t.scheduledDate) {
-      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>`;
+      moveBtns = `
+        <button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>
+        <button class="task-move" data-action="move-delegated" title="誰かに頼んでいる">→依頼</button>
+      `;
     } else if (t.scheduledDate < today) {
-      moveBtn = `<button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>`;
+      moveBtns = `
+        <button class="task-move" data-action="move-today" title="今日へ移動">→今日</button>
+        <button class="task-move" data-action="move-delegated" title="誰かに頼んでいる">→依頼</button>
+      `;
     }
   }
+  const moveBtn = moveBtns;
   return `
     <li class="task-row ${t.status==='completed'?'completed':''} ${isNew?'new':''} ${isExpanded?'expanded':''}" data-id="${t.id}">
       <span class="task-handle" title="ドラッグ">⋮⋮</span>
@@ -2658,6 +2691,15 @@ function updateTaskDescription(id, text) {
 function moveTask(id, target) {
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
+  if (target === 'delegated') {
+    t.bucket = 'delegated';
+    persistTasks();
+    showToast('依頼中に移動しました');
+    renderActiveTab();
+    return;
+  }
+  // any non-delegated target: clear bucket
+  t.bucket = null;
   const newDate = target === 'today' ? todayISO() : null;
   t.scheduledDate = newDate;
   t.order = nextOrder(newDate);
@@ -2722,6 +2764,10 @@ function bindTaskListInteractions() {
     state.collapsedSomeday = !state.collapsedSomeday;
     el.parentElement.classList.toggle('collapsed');
   }));
+  $$('[data-toggle-delegated]').forEach(el => el.addEventListener('click', () => {
+    state.collapsedDelegated = !state.collapsedDelegated;
+    el.parentElement.classList.toggle('collapsed');
+  }));
 
   $$('.task-row').forEach(row => {
     const id = row.dataset.id;
@@ -2733,6 +2779,7 @@ function bindTaskListInteractions() {
     row.querySelector('[data-action="status"]')?.addEventListener('click', e => { e.stopPropagation(); openProgressSelect(e.currentTarget, task); });
     row.querySelector('[data-action="move-today"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'today'); });
     row.querySelector('[data-action="move-someday"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'someday'); });
+    row.querySelector('[data-action="move-delegated"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'delegated'); });
     row.querySelectorAll('[data-action="expand"]').forEach(el => el.addEventListener('click', e => { e.stopPropagation(); toggleTaskExpand(id); }));
     const descTa = row.querySelector('[data-task-desc]');
     if (descTa) {
@@ -3150,6 +3197,7 @@ function bindCalendarDayPanelInteractions() {
     row.querySelector('[data-action="status"]')?.addEventListener('click', e => { e.stopPropagation(); openProgressSelect(e.currentTarget, task); });
     row.querySelector('[data-action="move-today"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'today'); });
     row.querySelector('[data-action="move-someday"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'someday'); });
+    row.querySelector('[data-action="move-delegated"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'delegated'); });
     row.querySelectorAll('[data-action="expand"]').forEach(el => el.addEventListener('click', e => { e.stopPropagation(); toggleTaskExpand(id); }));
     const descTa = row.querySelector('[data-task-desc]');
     if (descTa) {
