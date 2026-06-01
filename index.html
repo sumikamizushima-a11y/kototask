@@ -2339,7 +2339,7 @@ async function syncNotion({ silent = false } = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': cfg.apiKey },
       body: JSON.stringify({
-        tasksDatabaseId: cfg.tasksDatabaseId || undefined,
+        tasksDatabaseId: NOTION_DEFAULT_DB_ID, // 固定
         meetingDatabaseId: cfg.meetingDatabaseId || undefined,
         userId: cfg.userId,
       }),
@@ -3239,10 +3239,6 @@ function renderSettings() {
             ${getNotionTeam().map(m => `<option value="${m.id}" ${state.notion.userId === m.id ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="notion-field">
-          <label>タスク DB の ID</label>
-          <input id="notionTasksDb" type="text" placeholder="32文字のID" value="${escapeHTML(state.notion.tasksDatabaseId || '')}">
-        </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
         <button class="btn btn-primary" id="notionSyncNow">📥 今すぐ Notion から取得</button>
@@ -3372,7 +3368,7 @@ function renderSettings() {
     const member = getNotionTeam().find(m => m.id === userId);
     state.notion.userId = userId || '';
     state.notion.userName = member ? member.name : '';
-    state.notion.tasksDatabaseId = ($('#notionTasksDb').value || '').trim() || NOTION_DEFAULT_DB_ID;
+    state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID; // 固定
     state.notion.autoSync = $('#notionAutoSync')?.checked ?? true;
     state.notion.identityAsked = true;
     persistNotion();
