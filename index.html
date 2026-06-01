@@ -4044,20 +4044,38 @@ function showNotionIdentityModal() {
 }
 
 /* ============ Init ============ */
-// Reset URL trigger: ?reset=1 clears all KotoTask data
-(function handleResetParam() {
+// Reset URL trigger: ?reset=1 or ?reset=full clears all KotoTask data + auth
+(async function handleResetParam() {
   const params = new URLSearchParams(location.search);
-  if (params.get('reset') === '1') {
-    if (confirm('KotoTask のローカルデータを全部リセットしますか？\nクラウドに保存済みのデータは残ります（再ログインで戻ります）。')) {
-      Object.keys(localStorage).filter(k => k.startsWith('taskdock_')).forEach(k => localStorage.removeItem(k));
-      // Also clear Firebase auth so user gets fresh login
-      Object.keys(localStorage).filter(k => k.startsWith('firebase:') || k.includes('firebaseLocalStorage')).forEach(k => localStorage.removeItem(k));
-      indexedDB.deleteDatabase('firebaseLocalStorageDb');
-      const url = location.pathname;
-      setTimeout(() => location.replace(url), 100);
-      return;
+  const mode = params.get('reset');
+  if (!mode) return;
+  if (!confirm('KotoTask のローカルデータと Firebase ログイン状態をリセットしますか？\nクラウド（Firestore）に保存済みのデータは残ります — 再ログインで戻ります。')) return;
+
+  try {
+    // Sign out if Firebase is loaded
+    if (window._fb && window._fb.auth && window._fb.signOut) {
+      try { await window._fb.signOut(window._fb.auth); } catch {}
     }
+    // Wipe everything
+    localStorage.clear();
+    sessionStorage.clear();
+    // Delete all IndexedDB databases (Firebase stores auth in IDB)
+    try {
+      if (indexedDB.databases) {
+        const dbs = await indexedDB.databases();
+        await Promise.all((dbs || []).map(db => new Promise(r => {
+          const req = indexedDB.deleteDatabase(db.name);
+          req.onsuccess = req.onerror = req.onblocked = () => r();
+        })));
+      } else {
+        ['firebaseLocalStorageDb', 'firebase-heartbeat-database', 'firebase-installations-database'].forEach(n => indexedDB.deleteDatabase(n));
+      }
+    } catch (e) { console.warn('IDB delete error', e); }
+  } catch (e) {
+    console.warn('Reset error', e);
   }
+  // Force redirect without ?reset
+  location.replace(location.pathname);
 })();
 
 function showFatalError(err) {
