@@ -1994,13 +1994,13 @@ function migrateTemplates() {
 
 /* ============ State ============ */
 const DEFAULT_NOTION_CONFIG = {
-  workerUrl: '',
-  apiKey: '',
+  workerUrl: 'https://kototask-notion-proxy.kototask-86570.workers.dev',
+  apiKey: 'kt_dd66a96c9692cdfaaadbc73962568f13e1116de91719ed01',
   userId: '',                            // Notion user UUID (assignee filter)
   userName: '',                          // 自分の Notion 上の表示名
   tasksDatabaseId: NOTION_DEFAULT_DB_ID, // デフォルトで Kotomusubi の TODO DB
   meetingDatabaseId: '',
-  autoSync: false,
+  autoSync: true,                        // 起動時に自動同期
   lastSync: null,
   identityAsked: false,                  // 初回プロンプト済みフラグ
 };
@@ -2292,11 +2292,11 @@ async function notionFetchUsers() {
 async function syncNotion({ silent = false } = {}) {
   const cfg = state.notion;
   if (!cfg.workerUrl || !cfg.apiKey || !cfg.userId) {
-    if (!silent) showToast('Notion 設定が未完了です');
+    if (!silent) showToast('Notion: Settings で「自分は誰？」を選んでください');
     return { added: 0, error: '設定不足' };
   }
   if (!cfg.tasksDatabaseId && !cfg.meetingDatabaseId) {
-    if (!silent) showToast('タスク DB または ミーティング DB の ID を入れてください');
+    if (!silent) showToast('タスク DB の ID を入れてください');
     return { added: 0, error: 'DB ID 未設定' };
   }
 
@@ -2311,7 +2311,6 @@ async function syncNotion({ silent = false } = {}) {
         tasksDatabaseId: cfg.tasksDatabaseId || undefined,
         meetingDatabaseId: cfg.meetingDatabaseId || undefined,
         userId: cfg.userId,
-        since: cfg.lastSync ? cfg.lastSync.slice(0,10) : undefined,
       }),
     });
     if (!res.ok) {
@@ -2324,80 +2323,34 @@ async function syncNotion({ silent = false } = {}) {
     return { added: 0, error: e.message };
   }
 
-  let added = 0;
-  let updated = 0;
-  const today = todayISO();
-
-  // Import assigned tasks
-  for (const nt of (data.tasks || [])) {
-    if (!nt.notionPageId || !nt.title) continue;
-    const existing = state.tasks.find(t => t.notionPageId === nt.notionPageId);
-    if (existing) {
-      // Sync completion status
-      if (nt.completed && existing.status !== 'completed') {
-        existing.status = 'completed';
-        existing.completedAt = new Date().toISOString();
-        if (!existing.actualHours) existing.actualHours = existing.estimatedHours;
-        updated++;
-      }
-      continue;
-    }
-    // Skip already-completed tasks (don't import noise)
-    if (nt.completed) continue;
-    const id = addTask({
+  // Build the same data shape importNotionJSON expects, then delegate
+  const result = importNotionJSON(JSON.stringify({
+    tasks: (data.tasks || []).map(nt => ({
       title: nt.title,
-      scheduledDate: nt.dueDate || today,
+      notionPageId: nt.notionPageId,
+      url: nt.url,
+      dueDate: nt.dueDate,
       estimatedHours: 1,
-    });
-    const t = state.tasks.find(x => x.id === id);
-    if (t) {
-      t.notionPageId = nt.notionPageId;
-      t.notionUrl = nt.url || null;
-      t.notionSource = 'task';
-    }
-    added++;
-  }
+      status: nt.status,
+      completed: nt.completed,
+    })),
+    mentions: (data.mentions || []).map(m => ({
+      text: m.text,
+      notionBlockId: m.notionBlockId,
+      notionPageId: m.notionPageId,
+      pageUrl: m.pageUrl,
+      pageTitle: m.pageTitle,
+      completed: m.completed,
+    })),
+  }));
 
-  // Import meeting note mentions
-  for (const m of (data.mentions || [])) {
-    if (!m.notionBlockId || !m.text) continue;
-    const existing = state.tasks.find(t => t.notionBlockId === m.notionBlockId);
-    if (existing) {
-      if (m.completed && existing.status !== 'completed') {
-        existing.status = 'completed';
-        existing.completedAt = new Date().toISOString();
-        updated++;
-      }
-      continue;
-    }
-    if (m.completed) continue;
-    const id = addTask({
-      title: m.text.length > 80 ? m.text.slice(0, 80) + '…' : m.text,
-      scheduledDate: today,
-      estimatedHours: 0.5,
-    });
-    const t = state.tasks.find(x => x.id === id);
-    if (t) {
-      t.notionBlockId = m.notionBlockId;
-      t.notionPageId = m.notionPageId;
-      t.notionUrl = m.pageUrl || null;
-      t.notionSource = 'mention';
-      t.notionPageTitle = m.pageTitle;
-    }
-    added++;
-  }
-
-  persistTasks();
   state.notion.lastSync = new Date().toISOString();
   persistNotion();
 
-  if (!silent) {
-    const errMsg = (data.errors || []).length ? `（一部エラー: ${data.errors.map(e=>e.source).join(', ')}）` : '';
-    if (added === 0 && updated === 0) showToast('Notion: 新しい変更はありません' + errMsg);
-    else showToast(`Notion から ${added} 件追加 / ${updated} 件更新${errMsg}`);
+  if (!silent && (data.errors || []).length) {
+    showToast(`一部エラー: ${data.errors.map(e=>e.source).join(', ')}`);
   }
-  renderActiveTab();
-  return { added, updated };
+  return result;
 }
 
 function checkAutoApplyTemplates() {
@@ -3251,35 +3204,43 @@ function renderSettings() {
           <input id="notionTasksDb" type="text" placeholder="32文字のID" value="${escapeHTML(state.notion.tasksDatabaseId || '')}">
         </div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:10px;">
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="notionSyncNow">📥 今すぐ Notion から取得</button>
         <button class="btn btn-outline btn-sm" id="notionSaveConfig">設定を保存</button>
-        <a class="btn btn-outline btn-sm" href="${NOTION_DEFAULT_DB_URL}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;">📂 Notion でDBを開く</a>
+        <a class="btn btn-outline btn-sm" href="${NOTION_DEFAULT_DB_URL}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;">📂 Notion で DB を開く</a>
+        ${state.notion.lastSync ? `<span style="font-size:10px;color:var(--gray-500);margin-left:auto;">最終取得: ${new Date(state.notion.lastSync).toLocaleString('ja-JP')}</span>` : ''}
       </div>
 
-      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--gray-100);font-size:12px;color:var(--gray-600);line-height:1.7;">
-        Claude に「<b>Notion から自分のタスク取って</b>」と頼むと、上の設定をもとに JSON を返します。
-        それを下に貼って「取り込み」を押すと <b>インボックス</b> に入ります（直接タスクにはなりません）。Tasks タブで「ピック」したものだけタスク化されます。
-      </div>
-      <textarea id="notionImportJson" placeholder='ここに Claude からもらった JSON を貼ってください...' style="
-        width: 100%;
-        min-height: 110px;
-        max-height: 320px;
-        border: 1px solid var(--gray-200);
-        border-radius: 8px;
-        padding: 10px 12px;
-        font-size: 12px;
-        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-        background: var(--gray-50);
-        outline: none;
-        resize: vertical;
-        line-height: 1.5;
-        margin-top: 10px;
-      "></textarea>
-      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-        <button class="btn btn-primary" id="notionImportBtn">インボックスに取り込み</button>
-        <button class="btn btn-outline" id="notionImportClear">クリア</button>
-        ${state.notion.lastSync ? `<span style="font-size:10px;color:var(--gray-500);margin-left:auto;">最終取り込み: ${new Date(state.notion.lastSync).toLocaleString('ja-JP')}</span>` : ''}
-      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--gray-600);margin-top:10px;cursor:pointer;">
+        <input id="notionAutoSync" type="checkbox" ${state.notion.autoSync ? 'checked' : ''}>
+        <span>アプリ起動時に自動取得</span>
+      </label>
+
+      <details style="margin-top:18px;padding-top:14px;border-top:1px solid var(--gray-100);">
+        <summary style="font-size:11px;color:var(--gray-500);cursor:pointer;">手動で JSON ペースト（Worker が動かない時の予備）</summary>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:8px;line-height:1.6;">
+          Claude に「Notion から自分のタスク取って」と頼んで JSON を貼ります。
+        </div>
+        <textarea id="notionImportJson" placeholder='Claude からもらった JSON を貼り付け' style="
+          width: 100%;
+          min-height: 80px;
+          max-height: 220px;
+          border: 1px solid var(--gray-200);
+          border-radius: 8px;
+          padding: 8px 10px;
+          font-size: 11px;
+          font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+          background: var(--gray-50);
+          outline: none;
+          resize: vertical;
+          line-height: 1.5;
+          margin-top: 8px;
+        "></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn btn-outline btn-sm" id="notionImportBtn">インボックスに取り込み</button>
+          <button class="btn btn-outline btn-sm" id="notionImportClear">クリア</button>
+        </div>
+      </details>
     </div>
 
     <div class="card">
@@ -3372,10 +3333,25 @@ function renderSettings() {
     state.notion.userId = userId || '';
     state.notion.userName = member ? member.name : '';
     state.notion.tasksDatabaseId = ($('#notionTasksDb').value || '').trim() || NOTION_DEFAULT_DB_ID;
+    state.notion.autoSync = $('#notionAutoSync')?.checked ?? true;
     state.notion.identityAsked = true;
     persistNotion();
     showToast(member ? `${member.name} として保存しました` : 'Notion 設定を保存しました');
     renderSettings();
+  });
+
+  $('#notionSyncNow')?.addEventListener('click', async () => {
+    if (!state.notion.userId) {
+      alert('まず「自分は誰？」を選んで「設定を保存」してください');
+      return;
+    }
+    await syncNotion({ silent: false });
+    renderSettings();
+  });
+
+  $('#notionAutoSync')?.addEventListener('change', () => {
+    state.notion.autoSync = $('#notionAutoSync').checked;
+    persistNotion();
   });
 
   $('#notionImportBtn').addEventListener('click', () => {
@@ -4029,20 +4005,22 @@ function showNotionIdentityModal() {
 
 /* ============ Init ============ */
 function init() {
-  // Migrate: ensure default DB ID is set for existing users
-  if (!state.notion.tasksDatabaseId) {
-    state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID;
-    saveJSON(KEYS.notion, state.notion);
-  }
+  // Migrate: ensure Worker URL / API key / DB ID defaults for existing users
+  let migrated = false;
+  if (!state.notion.tasksDatabaseId) { state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID; migrated = true; }
+  if (!state.notion.workerUrl)       { state.notion.workerUrl       = DEFAULT_NOTION_CONFIG.workerUrl; migrated = true; }
+  if (!state.notion.apiKey)          { state.notion.apiKey          = DEFAULT_NOTION_CONFIG.apiKey; migrated = true; }
+  if (state.notion.autoSync === undefined) { state.notion.autoSync = true; migrated = true; }
+  if (migrated) saveJSON(KEYS.notion, state.notion);
+
   migrateTemplates();
   checkAutoApplyTemplates();
   renderNav();
   renderActiveTab();
   maybeShowReview();
-  maybeAskNotionIdentity();
-  // Auto Notion sync (background, non-blocking)
+  // Auto Notion sync (background, non-blocking) — only if userId is set
   if (state.notion.autoSync && state.notion.workerUrl && state.notion.apiKey && state.notion.userId) {
-    setTimeout(() => syncNotion({ silent: false }), 800);
+    setTimeout(() => syncNotion({ silent: true }), 1500);
   }
 }
 init();
