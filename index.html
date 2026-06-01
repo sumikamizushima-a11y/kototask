@@ -1910,7 +1910,7 @@ const KEYS = {
 const NOTION_DEFAULT_DB_ID = '33eedc46-8f20-80cd-b6dc-fbf3adfa6e95';
 const NOTION_DEFAULT_DB_URL = 'https://www.notion.so/33eedc468f2080cdb6dcfbf3adfa6e95';
 
-// Kotomusubi team members (Notion user IDs)
+// Fallback: hardcoded Kotomusubi team (used if Notion fetch fails)
 const NOTION_TEAM_MEMBERS = [
   { id: '9801293a-173d-4fd7-8286-902381d3621c', name: 'Sumika Mizushima' },
   { id: 'a2e4f053-6448-47ef-8175-ea8e622ac7cc', name: 'shion（shionnnn1016）' },
@@ -1919,6 +1919,37 @@ const NOTION_TEAM_MEMBERS = [
   { id: 'f1d2f8cc-11fb-4a82-b870-c5b631b15594', name: 'Haruka🇯🇵（nekodaisk）' },
   { id: '24bd872b-594c-81fb-948d-0002bdbf228d', name: 'Mai' },
 ];
+
+// Returns latest team from Notion (cached), or fallback
+function getNotionTeam() {
+  const cached = (() => { try { return JSON.parse(localStorage.getItem('taskdock_notionTeam') || 'null'); } catch { return null; } })();
+  if (cached && Array.isArray(cached.team) && cached.team.length) return cached.team;
+  return NOTION_TEAM_MEMBERS;
+}
+
+// Async fetch from Notion via Worker — populates cache
+async function fetchNotionTeam() {
+  const cfg = state.notion;
+  if (!cfg.workerUrl || !cfg.apiKey) return null;
+  try {
+    const res = await fetch(cfg.workerUrl.replace(/\/$/,'') + '/users', {
+      headers: { 'X-API-Key': cfg.apiKey }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const team = (data.users || [])
+      .filter(u => u.type === 'person')
+      .map(u => {
+        const emailPart = u.email ? `（${u.email.split('@')[0]}）` : '';
+        return { id: u.id, name: (u.name || '(no name)').trim() + emailPart };
+      });
+    if (!team.length) return null;
+    localStorage.setItem('taskdock_notionTeam', JSON.stringify({ team, fetchedAt: Date.now() }));
+    return team;
+  } catch (e) {
+    return null;
+  }
+}
 const loadJSON = (key, fb) => {
   try {
     const v = localStorage.getItem(key);
@@ -3150,6 +3181,15 @@ function bindCalendarDayPanelInteractions() {
 
 /* ============ Settings tab ============ */
 function renderSettings() {
+  // Auto-fetch latest Notion team list in background (so dropdown stays fresh)
+  const cached = (() => { try { return JSON.parse(localStorage.getItem('taskdock_notionTeam') || 'null'); } catch { return null; } })();
+  const isStale = !cached || (Date.now() - (cached.fetchedAt || 0) > 24*60*60*1000);
+  if (isStale && state.notion.workerUrl && state.notion.apiKey) {
+    fetchNotionTeam().then(team => {
+      if (team && team.length && state.activeTab === 'settings') renderSettings();
+    });
+  }
+
   const root = $('#tab-settings');
   root.innerHTML = `
     <div class="card">
@@ -3196,7 +3236,7 @@ function renderSettings() {
           <label>自分は誰？（担当者でフィルタするのに使う）</label>
           <select id="notionUser">
             <option value="">-- 選択してください --</option>
-            ${NOTION_TEAM_MEMBERS.map(m => `<option value="${m.id}" ${state.notion.userId === m.id ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}
+            ${getNotionTeam().map(m => `<option value="${m.id}" ${state.notion.userId === m.id ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}
           </select>
         </div>
         <div class="notion-field">
@@ -3329,7 +3369,7 @@ function renderSettings() {
   // ===== Notion import handlers =====
   $('#notionSaveConfig')?.addEventListener('click', () => {
     const userId = $('#notionUser').value;
-    const member = NOTION_TEAM_MEMBERS.find(m => m.id === userId);
+    const member = getNotionTeam().find(m => m.id === userId);
     state.notion.userId = userId || '';
     state.notion.userName = member ? member.name : '';
     state.notion.tasksDatabaseId = ($('#notionTasksDb').value || '').trim() || NOTION_DEFAULT_DB_ID;
