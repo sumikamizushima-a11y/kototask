@@ -719,39 +719,60 @@ main {
   border-bottom: 1px solid var(--gray-100);
   gap: 8px;
 }
-.notes-hide-btn {
-  border: none;
-  background: var(--gray-100);
-  color: var(--gray-600);
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  font-size: 14px;
+.notes-hide-banner {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  background: var(--gray-50);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
   cursor: pointer;
-  line-height: 1;
+  transition: all .15s ease;
+  font-family: inherit;
+}
+.notes-hide-banner:hover {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.notes-hide-banner-action {
+  font-size: 11px;
+  color: var(--gray-500);
+  font-weight: 500;
+}
+.notes-hide-banner:hover .notes-hide-banner-action { color: rgba(255,255,255,.8); }
+
+.show-notes-btn {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all .15s ease;
-  padding: 0;
-  margin-left: auto;
-}
-.notes-hide-btn:hover { background: var(--ink); color: #fff; }
-
-.show-notes-btn {
-  border: 1px solid var(--border);
-  background: #fff;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px dashed var(--gray-300);
+  background: var(--gray-50);
   color: var(--gray-700);
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   margin-bottom: 12px;
   transition: all .15s ease;
   font-family: inherit;
 }
-.show-notes-btn:hover { background: var(--ink); color: #fff; border-color: var(--ink); }
+.show-notes-btn:hover {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+  border-style: solid;
+}
 
 .tasks-grid.notes-hidden { grid-template-columns: minmax(0, 1fr); }
 .notes-title { font-size: 13px; font-weight: 700; color: var(--ink); }
@@ -3004,10 +3025,13 @@ function renderNotesPanel() {
 
   return `
     <div class="notes-panel">
+      <button class="notes-hide-banner" data-action="hide-notes" title="メモパネルを閉じる">
+        <span>📝 メモパネル</span>
+        <span class="notes-hide-banner-action">✕ 閉じる</span>
+      </button>
       <div class="notes-header">
         <div class="notes-title">Notes</div>
         <div class="notes-count">${notes.length}件</div>
-        <button class="notes-hide-btn" data-action="hide-notes" title="メモを隠す">−</button>
       </div>
       <div class="notes-add">
         <textarea id="noteInput" placeholder="メモを追加..."></textarea>
