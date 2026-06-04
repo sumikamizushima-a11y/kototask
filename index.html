@@ -3575,9 +3575,31 @@ function renderSettings() {
     renderSettings();
   });
 
+  // Auto-save when identity dropdown changes
+  $('#notionUser')?.addEventListener('change', () => {
+    const userId = $('#notionUser').value;
+    const member = getNotionTeam().find(m => m.id === userId);
+    state.notion.userId = userId || '';
+    state.notion.userName = member ? member.name : '';
+    state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID;
+    state.notion.identityAsked = true;
+    persistNotion();
+    if (member) showToast(`${member.name} として保存しました`);
+  });
+
   $('#notionSyncNow')?.addEventListener('click', async () => {
+    // Auto-save if user selected but not yet saved
+    const selectedUserId = $('#notionUser')?.value;
+    if (selectedUserId && !state.notion.userId) {
+      const member = getNotionTeam().find(m => m.id === selectedUserId);
+      state.notion.userId = selectedUserId;
+      state.notion.userName = member ? member.name : '';
+      state.notion.tasksDatabaseId = NOTION_DEFAULT_DB_ID;
+      state.notion.identityAsked = true;
+      persistNotion();
+    }
     if (!state.notion.userId) {
-      alert('まず「自分は誰？」を選んで「設定を保存」してください');
+      alert('「自分は誰？」を選択してください');
       return;
     }
     await syncNotion({ silent: false });
