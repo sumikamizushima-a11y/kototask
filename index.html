@@ -574,22 +574,20 @@ main {
 }
 .task-desc-collapse {
   flex-shrink: 0;
-  border: none;
-  background: transparent;
-  color: var(--gray-500);
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  font-size: 11px;
+  border: 1px solid rgba(168,143,92,.3);
+  background: #fff;
+  color: var(--gray-700);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   transition: all .15s ease;
-  padding: 0;
+  white-space: nowrap;
+  font-family: inherit;
 }
-.task-desc-collapse:hover { background: rgba(0,0,0,.08); color: var(--ink); }
+.task-desc-collapse:hover { background: #8c7340; color: #fff; border-color: #8c7340; }
 
 .task-description {
   flex-basis: 100%;
@@ -2791,7 +2789,7 @@ function taskRowHTML(t) {
       ` : (hasDesc && !t.memoCollapsed ? `
         <div class="task-desc-preview" data-action="expand" title="クリックで編集">
           <span class="task-desc-text">${escapeHTML(t.description.trim())}</span>
-          <button class="task-desc-collapse" data-action="collapse-memo" title="このメモを閉じる">✕</button>
+          <button class="task-desc-collapse" data-action="collapse-memo" title="メモを折りたたむ">▲ 隠す</button>
         </div>
       ` : '')}
     </li>
