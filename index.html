@@ -2007,12 +2007,12 @@ const NOTION_DEFAULT_DB_URL = 'https://www.notion.so/33eedc468f2080cdb6dcfbf3adf
 
 // Fallback: hardcoded Kotomusubi team (used if Notion fetch fails)
 const NOTION_TEAM_MEMBERS = [
-  { id: '9801293a-173d-4fd7-8286-902381d3621c', name: 'Sumika Mizushima' },
-  { id: 'a2e4f053-6448-47ef-8175-ea8e622ac7cc', name: 'shion（shionnnn1016）' },
-  { id: '332d872b-594c-81ab-a619-000297216d27', name: 'shion（nihongo.kotomusubi）' },
-  { id: '2f0d872b-594c-819a-bc8e-0002d865dcdf', name: 'はるか（uru65coco）' },
-  { id: 'f1d2f8cc-11fb-4a82-b870-c5b631b15594', name: 'Haruka🇯🇵（nekodaisk）' },
-  { id: '24bd872b-594c-81fb-948d-0002bdbf228d', name: 'Mai' },
+  { id: '9801293a-173d-4fd7-8286-902381d3621c', name: 'Sumika Mizushima',           email: 'sumikamizushima@gmail.com' },
+  { id: 'a2e4f053-6448-47ef-8175-ea8e622ac7cc', name: 'shion（shionnnn1016）',      email: 'shionnnn1016@gmail.com' },
+  { id: '332d872b-594c-81ab-a619-000297216d27', name: 'shion（nihongo.kotomusubi）', email: 'nihongo.kotomusubi@gmail.com' },
+  { id: '2f0d872b-594c-819a-bc8e-0002d865dcdf', name: 'はるか（uru65coco）',         email: 'uru65coco@gmail.com' },
+  { id: 'f1d2f8cc-11fb-4a82-b870-c5b631b15594', name: 'Haruka🇯🇵（nekodaisk）',     email: 'nekodaisk.haruka@gmail.com' },
+  { id: '24bd872b-594c-81fb-948d-0002bdbf228d', name: 'Mai',                         email: 'mizomai93@gmail.com' },
 ];
 
 // Returns latest team from Notion (cached), or fallback
@@ -4012,6 +4012,19 @@ async function onSignedIn(user) {
   window._fb.user = user;
   hideAuthOverlay();
   showAuthBadge(user);
+
+  // Auto-map Google email → Notion user (if not already set)
+  if (!state.notion.userId && user.email) {
+    const team = getNotionTeam();
+    const match = team.find(m => m.email && m.email.toLowerCase() === user.email.toLowerCase());
+    if (match) {
+      state.notion.userId = match.id;
+      state.notion.userName = match.name;
+      state.notion.identityAsked = true;
+      persistNotion();
+      showToast(`${match.name} として自動設定`);
+    }
+  }
 
   const docRef = window._fb.doc(window._fb.db, 'users', user.uid, 'state', 'main');
   // 1) First-load: check if remote exists
