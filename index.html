@@ -242,6 +242,22 @@ main {
   font-weight: 600;
   box-shadow: var(--shadow-sm);
 }
+.hero-memo-toggle {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--gray-700);
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all .15s ease;
+  font-family: inherit;
+}
+.hero-memo-toggle:hover { background: var(--gray-100); }
+.hero-memo-toggle.hidden { background: var(--ink); color: #fff; border-color: var(--ink); }
+.hero-memo-toggle.hidden:hover { background: var(--pri-600); }
+
 .hero-numbers {
   display: flex;
   align-items: baseline;
@@ -2112,6 +2128,7 @@ const state = {
   collapsedSomeday: false,
   collapsedDelegated: false,
   notesHidden: localStorage.getItem('taskdock_notesHidden') === '1',
+  taskMemosHidden: localStorage.getItem('taskdock_taskMemosHidden') === '1',
   expandedNoteId: null,
   expandedTaskId: null,
   justAddedId: null,
@@ -2487,9 +2504,14 @@ function renderTasks() {
         <div class="card hero">
           <div class="hero-top">
             <div class="hero-date">${formatDateJP(today)}</div>
-            <div class="view-toggle">
-              <button data-view="list" class="${state.view==='list'?'active':''}">リスト</button>
-              <button data-view="timeline" class="${state.view==='timeline'?'active':''}">タイムライン</button>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <button class="hero-memo-toggle ${state.taskMemosHidden?'hidden':''}" data-action="toggle-memos" title="${state.taskMemosHidden?'タスクのメモを表示':'タスクのメモを非表示'}">
+                ${state.taskMemosHidden ? '📝 メモ表示' : '📝 メモ非表示'}
+              </button>
+              <div class="view-toggle">
+                <button data-view="list" class="${state.view==='list'?'active':''}">リスト</button>
+                <button data-view="timeline" class="${state.view==='timeline'?'active':''}">タイムライン</button>
+              </div>
             </div>
           </div>
           <div class="hero-numbers">
@@ -2549,6 +2571,13 @@ function renderTasks() {
   else bindTimelineInteractions();
   bindNotesInteractions();
   bindInboxInteractions();
+
+  // Task memos show/hide toggle
+  $('[data-action="toggle-memos"]')?.addEventListener('click', () => {
+    state.taskMemosHidden = !state.taskMemosHidden;
+    localStorage.setItem('taskdock_taskMemosHidden', state.taskMemosHidden ? '1' : '0');
+    renderTasks();
+  });
 
   // Notes show/hide toggle
   $('[data-action="hide-notes"]')?.addEventListener('click', () => {
@@ -2740,7 +2769,7 @@ function taskRowHTML(t) {
       <button class="task-delete" data-action="delete" aria-label="削除">${Icon.trash}</button>
       ${isExpanded ? `
         <textarea class="task-description" data-task-desc="${t.id}" placeholder="メモ・詳細を書く（複数行 OK）">${escapeHTML(t.description || '')}</textarea>
-      ` : (hasDesc ? `
+      ` : (hasDesc && !state.taskMemosHidden ? `
         <div class="task-desc-preview" data-action="expand" title="クリックで編集">${escapeHTML(t.description.trim())}</div>
       ` : '')}
     </li>
