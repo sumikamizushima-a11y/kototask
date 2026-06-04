@@ -561,11 +561,35 @@ main {
   background: rgba(168,143,92,.08);
   border-radius: 6px;
   border-left: 3px solid rgba(168,143,92,.5);
-  white-space: pre-wrap;
   word-break: break-word;
   transition: background .15s ease;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 .task-desc-preview:hover { background: rgba(168,143,92,.16); }
+.task-desc-preview .task-desc-text {
+  flex: 1;
+  white-space: pre-wrap;
+}
+.task-desc-collapse {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--gray-500);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .15s ease;
+  padding: 0;
+}
+.task-desc-collapse:hover { background: rgba(0,0,0,.08); color: var(--ink); }
 
 .task-description {
   flex-basis: 100%;
@@ -2504,14 +2528,9 @@ function renderTasks() {
         <div class="card hero">
           <div class="hero-top">
             <div class="hero-date">${formatDateJP(today)}</div>
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <button class="hero-memo-toggle ${state.taskMemosHidden?'hidden':''}" data-action="toggle-memos" title="${state.taskMemosHidden?'タスクのメモを表示':'タスクのメモを非表示'}">
-                ${state.taskMemosHidden ? '📝 メモ表示' : '📝 メモ非表示'}
-              </button>
-              <div class="view-toggle">
-                <button data-view="list" class="${state.view==='list'?'active':''}">リスト</button>
-                <button data-view="timeline" class="${state.view==='timeline'?'active':''}">タイムライン</button>
-              </div>
+            <div class="view-toggle">
+              <button data-view="list" class="${state.view==='list'?'active':''}">リスト</button>
+              <button data-view="timeline" class="${state.view==='timeline'?'active':''}">タイムライン</button>
             </div>
           </div>
           <div class="hero-numbers">
@@ -2769,8 +2788,11 @@ function taskRowHTML(t) {
       <button class="task-delete" data-action="delete" aria-label="削除">${Icon.trash}</button>
       ${isExpanded ? `
         <textarea class="task-description" data-task-desc="${t.id}" placeholder="メモ・詳細を書く（複数行 OK）">${escapeHTML(t.description || '')}</textarea>
-      ` : (hasDesc && !state.taskMemosHidden ? `
-        <div class="task-desc-preview" data-action="expand" title="クリックで編集">${escapeHTML(t.description.trim())}</div>
+      ` : (hasDesc && !t.memoCollapsed ? `
+        <div class="task-desc-preview" data-action="expand" title="クリックで編集">
+          <span class="task-desc-text">${escapeHTML(t.description.trim())}</span>
+          <button class="task-desc-collapse" data-action="collapse-memo" title="このメモを閉じる">✕</button>
+        </div>
       ` : '')}
     </li>
   `;
@@ -2778,8 +2800,15 @@ function taskRowHTML(t) {
 
 function toggleTaskExpand(id) {
   state.expandedTaskId = state.expandedTaskId === id ? null : id;
+  // Opening expands → also un-collapse this task's preview so it shows again on close
+  if (state.expandedTaskId === id) {
+    const t = state.tasks.find(x => x.id === id);
+    if (t && t.memoCollapsed) {
+      t.memoCollapsed = false;
+      persistTasks();
+    }
+  }
   renderActiveTab();
-  // Focus the newly opened textarea
   if (state.expandedTaskId === id) {
     setTimeout(() => {
       const ta = document.querySelector(`[data-task-desc="${id}"]`);
@@ -2789,6 +2818,14 @@ function toggleTaskExpand(id) {
       }
     }, 0);
   }
+}
+
+function collapseTaskMemo(id) {
+  const t = state.tasks.find(x => x.id === id);
+  if (!t) return;
+  t.memoCollapsed = true;
+  persistTasks();
+  renderActiveTab();
 }
 
 function updateTaskDescription(id, text) {
@@ -2891,6 +2928,7 @@ function bindTaskListInteractions() {
     row.querySelector('[data-action="move-someday"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'someday'); });
     row.querySelector('[data-action="move-delegated"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'delegated'); });
     row.querySelectorAll('[data-action="expand"]').forEach(el => el.addEventListener('click', e => { e.stopPropagation(); toggleTaskExpand(id); }));
+    row.querySelector('[data-action="collapse-memo"]')?.addEventListener('click', e => { e.stopPropagation(); collapseTaskMemo(id); });
     const descTa = row.querySelector('[data-task-desc]');
     if (descTa) {
       autoGrowTextarea(descTa);
@@ -3313,6 +3351,7 @@ function bindCalendarDayPanelInteractions() {
     row.querySelector('[data-action="move-someday"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'someday'); });
     row.querySelector('[data-action="move-delegated"]')?.addEventListener('click', e => { e.stopPropagation(); moveTask(id, 'delegated'); });
     row.querySelectorAll('[data-action="expand"]').forEach(el => el.addEventListener('click', e => { e.stopPropagation(); toggleTaskExpand(id); }));
+    row.querySelector('[data-action="collapse-memo"]')?.addEventListener('click', e => { e.stopPropagation(); collapseTaskMemo(id); });
     const descTa = row.querySelector('[data-task-desc]');
     if (descTa) {
       autoGrowTextarea(descTa);
