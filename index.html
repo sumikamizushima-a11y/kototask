@@ -717,7 +717,43 @@ main {
   margin-bottom: 12px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--gray-100);
+  gap: 8px;
 }
+.notes-hide-btn {
+  border: none;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .15s ease;
+  padding: 0;
+  margin-left: auto;
+}
+.notes-hide-btn:hover { background: var(--ink); color: #fff; }
+
+.show-notes-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--gray-700);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 12px;
+  transition: all .15s ease;
+  font-family: inherit;
+}
+.show-notes-btn:hover { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+.tasks-grid.notes-hidden { grid-template-columns: minmax(0, 1fr); }
 .notes-title { font-size: 13px; font-weight: 700; color: var(--ink); }
 .notes-count { font-size: 11px; color: var(--gray-500); font-weight: 500; }
 .notes-add {
@@ -2054,6 +2090,7 @@ const state = {
   collapsedDays: new Set(),
   collapsedSomeday: false,
   collapsedDelegated: false,
+  notesHidden: localStorage.getItem('taskdock_notesHidden') === '1',
   expandedNoteId: null,
   expandedTaskId: null,
   justAddedId: null,
@@ -2113,9 +2150,21 @@ function renderActiveTab() {
 /* ============ Helpers ============ */
 const getProject  = id => state.projects.find(p => p.id === id);
 const getWorkType = id => state.workTypes.find(w => w.id === id);
-const tasksOnDate = iso => state.tasks
-  .filter(t => t.scheduledDate === iso && t.bucket !== 'delegated')
-  .sort((a,b) => (a.order||0) - (b.order||0));
+const tasksOnDate = iso => {
+  const today = todayISO();
+  // For today: include all past-unfinished (carry-over) so 0:00 越えても消えない
+  if (iso === today) {
+    return state.tasks
+      .filter(t =>
+        (t.scheduledDate === iso || (t.scheduledDate && t.scheduledDate < iso && t.status !== 'completed'))
+        && t.bucket !== 'delegated'
+      )
+      .sort((a,b) => (a.order||0) - (b.order||0));
+  }
+  return state.tasks
+    .filter(t => t.scheduledDate === iso && t.bucket !== 'delegated')
+    .sort((a,b) => (a.order||0) - (b.order||0));
+};
 const somedayTasks = () => state.tasks
   .filter(t => !t.scheduledDate && t.bucket !== 'delegated')
   .sort((a,b) => (a.order||0) - (b.order||0));
@@ -2411,8 +2460,9 @@ function renderTasks() {
   const pct = totalEst > 0 ? Math.round(doneEst / totalEst * 100) : 0;
 
   root.innerHTML = `
-    <div class="tasks-grid">
+    <div class="tasks-grid ${state.notesHidden?'notes-hidden':''}">
       <div class="tasks-col">
+        ${state.notesHidden ? `<button class="show-notes-btn" data-action="show-notes" title="メモを表示">📝 メモを開く</button>` : ''}
         <div class="card hero">
           <div class="hero-top">
             <div class="hero-date">${formatDateJP(today)}</div>
@@ -2442,9 +2492,7 @@ function renderTasks() {
         ${state.view === 'list' ? renderListView(today, todayTasks) : renderTimelineView(todayTasks)}
       </div>
 
-      <div class="notes-col">
-        ${renderNotesPanel()}
-      </div>
+      ${state.notesHidden ? '' : `<div class="notes-col">${renderNotesPanel()}</div>`}
     </div>
   `;
 
@@ -2480,6 +2528,18 @@ function renderTasks() {
   else bindTimelineInteractions();
   bindNotesInteractions();
   bindInboxInteractions();
+
+  // Notes show/hide toggle
+  $('[data-action="hide-notes"]')?.addEventListener('click', () => {
+    state.notesHidden = true;
+    localStorage.setItem('taskdock_notesHidden', '1');
+    renderTasks();
+  });
+  $('[data-action="show-notes"]')?.addEventListener('click', () => {
+    state.notesHidden = false;
+    localStorage.setItem('taskdock_notesHidden', '0');
+    renderTasks();
+  });
 }
 
 function bindInboxInteractions() {
@@ -2947,6 +3007,7 @@ function renderNotesPanel() {
       <div class="notes-header">
         <div class="notes-title">Notes</div>
         <div class="notes-count">${notes.length}件</div>
+        <button class="notes-hide-btn" data-action="hide-notes" title="メモを隠す">−</button>
       </div>
       <div class="notes-add">
         <textarea id="noteInput" placeholder="メモを追加..."></textarea>
